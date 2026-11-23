@@ -1,0 +1,74 @@
+"""
+Holds what the PDF looks like after it has been read:
+its pages, the text blocks on each page, where each line sits,
+whether a page was read as text or with OCR, and the page numbers.
+ It's a clean, structured copy of the PDF's content
+
+ With labelled boxes, each step knows exactly where to look and doesn't have to read the messy PDF again
+"""
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, PositiveInt, NonNegativeInt, model_validator
+
+
+class SourceRef(BaseModel):     #where the PDF lives
+    uri: str
+    allowed_groups: list[str] = ["*"] # Ex: cardiologie, sist_nervos, etc..
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+class Line(BaseModel):          # one line of text
+    text: str                   #line's text
+    y_top: float                  #recognise a line as sitting in the header or footer band
+    y_bottom: float
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class Block(BaseModel):         # one block of content
+    kind: Literal[
+        "paragraph",
+        "heading",
+        "subheading",
+        "table",
+    ]
+    lines: list[Line]
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class PageText(BaseModel):      # one page
+    page_index: PositiveInt
+    page_label: str             # what's printed on the page ("22")
+    extraction: Literal["text", "ocr"]
+    blocks: list[Block]
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class OutlineEntry(BaseModel):
+    level: PositiveInt
+    title: str
+    page_index: PositiveInt
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+class ParsedDocument(BaseModel): # The whole PDF Parsed
+    doc_id: str                 # from ids.py
+    title: str
+    file_name: str
+    outline: list[OutlineEntry]
+    pages: list[PageText]
+    page_offsets: list[NonNegativeInt] # list of small marks on that strip, one per page: "page 1 starts at letter 0, page 2 at letter 1,200, page 3 at letter 2,500".
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @model_validator(mode="after")
+    def _check_page_offsets(self) -> "ParsedDocument":
+        if len(self.page_offsets) != len(self.pages):
+            raise ValueError("page_offsets must have one entry per page")
+        if self.page_offsets and self.page_offsets[0] != 0:
+            raise ValueError("page_offsets must start at 0")
+        for previous, current in zip(self.page_offsets, self.page_offsets[1:]):
+            if current < previous:
+                raise ValueError("page_offsets must never decrease")
+        return self
+
