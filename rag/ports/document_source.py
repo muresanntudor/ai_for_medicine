@@ -11,14 +11,14 @@ class DocumentSource(Protocol):
     only ever talks to this contract, never to the concrete source.
     """
 
-    async def list(self) -> list[SourceRef]:
+    def list(self) -> list[SourceRef]:
         """Return a SourceRef for every PDF this source can see.
 
         Returns an empty list when there are no PDFs. Must not read file contents.
         """
         ...
 
-    async def read(self, ref: SourceRef) -> bytes:
+    def read(self, ref: SourceRef) -> bytes:
         """Return the raw bytes of the PDF that `ref` points to.
 
         Raises ExtractionFailed (reason "file could not be read") when the file

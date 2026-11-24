@@ -8,8 +8,8 @@ from rag.domain.models import ParsedDocument
 class PdfParser(Protocol):
     """Anything that can read a PDF's bytes and return its structured content.
 
-    parse() is a normal (sync) method on purpose: parsing is heavy CPU work,
-    so the pipeline runs it in a background thread with asyncio.to_thread.
+    parse() is a normal (sync) method: with only a few PDFs the pipeline
+    simply parses them one after another.
     """
 
     def parse(self, data: bytes, doc_id: str, file_name: str) -> ParsedDocument:
