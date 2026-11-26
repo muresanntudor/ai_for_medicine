@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from rag.domain.models import (
+    PAGE_SEPARATOR,
     Block,
     Line,
     OutlineEntry,
@@ -120,3 +121,26 @@ def test_document_is_frozen():
 def test_unknown_field_is_rejected():
     with pytest.raises(ValidationError):
         SourceRef(uri="/a.pdf", allowed_group=["doctors"])
+
+
+# ---------- PageText.plain_text ----------
+
+def test_plain_text_joins_lines_and_blocks():
+    page = PageText(
+        page_index=1,
+        page_label="1",
+        extraction="text",
+        blocks=[
+            Block(kind="heading", lines=[Line(text="a", y_top=0, y_bottom=1), Line(text="b", y_top=1, y_bottom=2)]),
+            Block(kind="paragraph", lines=[Line(text="c", y_top=2, y_bottom=3)]),
+        ],
+    )
+    assert page.plain_text() == "a\nb\n\nc"
+
+
+def test_plain_text_of_empty_page_is_empty():
+    assert PageText(page_index=1, page_label="1", extraction="ocr", blocks=[]).plain_text() == ""
+
+
+def test_page_separator_is_a_blank_line():
+    assert PAGE_SEPARATOR == "\n\n"

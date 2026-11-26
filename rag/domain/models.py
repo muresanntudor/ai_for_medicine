@@ -9,6 +9,10 @@ whether a page was read as text or with OCR, and the page numbers.
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, PositiveInt, NonNegativeInt, model_validator
 
+# Glues pages together into one long document text (used for page_offsets and chunking),
+# so the last word of one page never sticks to the first word of the next.
+PAGE_SEPARATOR = "\n\n"
+
 
 class SourceRef(BaseModel):     #where the PDF lives
     uri: str
@@ -42,6 +46,14 @@ class PageText(BaseModel):      # one page
     blocks: list[Block]
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    def plain_text(self) -> str:
+        """The page as one string: lines joined by a newline, blocks by a blank line.
+
+        The ONE rule for page -> text. page_offsets and chunking must both use it,
+        otherwise offsets would point to the wrong place.
+        """
+        return "\n\n".join("\n".join(line.text for line in block.lines) for block in self.blocks)
 
 
 class OutlineEntry(BaseModel):
