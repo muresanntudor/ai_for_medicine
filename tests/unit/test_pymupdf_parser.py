@@ -7,11 +7,11 @@ from rag.adapters.pdf.pymupdf_parser import (
     _body_font_size,
     _build_page,
     _outline,
-    _page_offsets,
+    _reading_order,
     _title,
 )
 from rag.domain.errors import CorruptPdf, ExtractionFailed
-from rag.domain.models import PAGE_SEPARATOR, Block, Line, PageText, ParsedDocument
+from rag.domain.models import PAGE_SEPARATOR, Block, Line, PageText, ParsedDocument, compute_page_offsets
 from rag.ports.pdf_parser import PdfParser
 
 
@@ -219,7 +219,7 @@ def test_outline_skips_broken_rows():
     assert [e.title for e in _outline(FakePdf())] == ["Bun"]
 
 
-# ---------- _page_offsets ----------
+# ---------- compute_page_offsets ----------
 
 def text_page(index: int, text: str) -> PageText:
     blocks = [Block(kind="paragraph", lines=[Line(text=text, y_top=0, y_bottom=1)])] if text else []
@@ -227,21 +227,21 @@ def text_page(index: int, text: str) -> PageText:
 
 
 def test_offsets_no_pages():
-    assert _page_offsets([]) == []
+    assert compute_page_offsets([]) == []
 
 
 def test_offsets_one_page():
-    assert _page_offsets([text_page(1, "abc")]) == [0]
+    assert compute_page_offsets([text_page(1, "abc")]) == [0]
 
 
 def test_offsets_add_length_plus_separator():
     pages = [text_page(1, "a" * 10), text_page(2, "b" * 5), text_page(3, "c")]
-    assert _page_offsets(pages) == [0, 12, 19]
+    assert compute_page_offsets(pages) == [0, 12, 19]
 
 
 def test_offsets_with_empty_page():
     pages = [text_page(1, "abc"), text_page(2, ""), text_page(3, "xyz")]
-    assert _page_offsets(pages) == [0, 5, 7]
+    assert compute_page_offsets(pages) == [0, 5, 7]
 
 
 def test_offsets_point_at_each_page_in_the_full_text():
@@ -252,7 +252,7 @@ def test_offsets_point_at_each_page_in_the_full_text():
     ])
     pages = build_pages(pdf_bytes)
     full_text = PAGE_SEPARATOR.join(page.plain_text() for page in pages)
-    for page, offset in zip(pages, _page_offsets(pages)):
+    for page, offset in zip(pages, compute_page_offsets(pages)):
         assert full_text[offset:].startswith(page.plain_text())
 
 
@@ -277,7 +277,7 @@ def test_parse_returns_full_parsed_document():
     assert [e.title for e in doc.outline] == ["Capitol 1", "Capitol 2"]
     assert [p.page_index for p in doc.pages] == [1, 2]
     assert [b.kind for b in doc.pages[0].blocks] == ["heading", "paragraph"]
-    assert doc.page_offsets == _page_offsets(doc.pages)
+    assert doc.page_offsets == compute_page_offsets(doc.pages)
 
 
 def test_parse_unexpected_error_becomes_extraction_failed(monkeypatch):
@@ -323,3 +323,41 @@ def test_parser_fixes_diacritics_by_default():
 def test_parser_can_leave_text_untouched():
     doc = PyMuPdfParser(fix_legacy_diacritics=False).parse(legacy_pdf(), "id", "carte.pdf")
     assert doc.pages[0].blocks[0].lines[0].text == "Func]iile fundamentale"
+
+
+# ---------- _reading_order: two-column pages ----------
+
+def raw(text: str, x0: float, y0: float, x1: float) -> dict:
+    return {"type": 0, "bbox": (x0, y0, x1, y0 + 10), "text": text}
+
+
+def test_reading_order_left_column_then_right_column():
+    blocks = [
+        raw("right top", 300, 40, 540),
+        raw("left bottom", 45, 600, 280),
+        raw("left top", 45, 70, 280),
+        raw("right bottom", 300, 500, 540),
+    ]
+    ordered = [b["text"] for b in _reading_order(blocks, page_width=580)]
+    assert ordered == ["left top", "left bottom", "right top", "right bottom"]
+
+
+def test_reading_order_single_column_is_top_to_bottom():
+    blocks = [raw("second", 72, 200, 520), raw("first", 72, 100, 520), raw("third", 72, 300, 520)]
+    assert [b["text"] for b in _reading_order(blocks, page_width=595)] == ["first", "second", "third"]
+
+
+def test_two_column_pdf_is_read_column_by_column():
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=580, height=800)
+    page.insert_text((300, 60), "Coloana dreapta sus.", fontsize=11)
+    page.insert_text((45, 100), "Coloana stanga sus.", fontsize=11)
+    page.insert_text((300, 400), "Coloana dreapta jos.", fontsize=11)
+    page.insert_text((45, 500), "Coloana stanga jos.", fontsize=11)
+    page_text = build_pages(pdf.tobytes())[0]
+    assert [b.lines[0].text for b in page_text.blocks] == [
+        "Coloana stanga sus.",
+        "Coloana stanga jos.",
+        "Coloana dreapta sus.",
+        "Coloana dreapta jos.",
+    ]

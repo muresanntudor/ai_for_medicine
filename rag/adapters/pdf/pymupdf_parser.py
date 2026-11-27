@@ -13,7 +13,7 @@ from typing import Literal
 import pymupdf
 from rag.adapters.pdf.diacritics import fix_legacy_romanian, keep_text
 from rag.adapters.pdf.page_strategy import choose_extraction
-from rag.domain.models import PAGE_SEPARATOR, Block, Line, OutlineEntry, PageText, ParsedDocument
+from rag.domain.models import Block, Line, OutlineEntry, PageText, ParsedDocument, compute_page_offsets
 from rag.domain.errors import CorruptPdf, ExtractionFailed
 
 # In PyMuPDF's "dict" output, a block of type 0 is text (1 would be an image).
@@ -58,7 +58,7 @@ class PyMuPdfParser:
                     file_name=file_name,
                     outline=_outline(pdf, self._fix_text),
                     pages=pages,
-                    page_offsets=_page_offsets(pages),
+                    page_offsets=compute_page_offsets(pages),
                 )
             except ExtractionFailed:
                 # Our own errors (CorruptPdf included) already have a clear reason.
@@ -139,7 +139,7 @@ def _build_page(
     empty blocks are dropped, and each block gets its kind from _block_kind.
     """
     blocks: list[Block] = []
-    for raw_block in page.get_text("dict")["blocks"]:
+    for raw_block in _reading_order(page.get_text("dict")["blocks"], page.rect.width):
         if raw_block["type"] != TEXT_BLOCK:
             continue
 
@@ -182,15 +182,20 @@ def _outline(pdf: pymupdf.Document, fix_text: Callable[[str], str] = keep_text) 
     return entries
 
 
-def _page_offsets(pages: list[PageText]) -> list[int]:
-    """Where each page starts in the whole document's text.
+def _reading_order(raw_blocks: list[dict], page_width: float) -> list[dict]:
+    """Sort blocks the way a person reads a two-column page:
+    the whole left column top to bottom, then the whole right column.
 
-    The document text is every page's plain_text() joined with PAGE_SEPARATOR,
-    so each next page starts after the previous page's text plus the separator.
+    A block belongs to the left column when its centre is left of the page's middle.
+    On a one-column page every block lands in the same column, so this is simply
+    top to bottom. (PyMuPDF's own sort=True goes line by line across both columns,
+    which mixes them up.)
     """
-    offsets: list[int] = []
-    position = 0
-    for page in pages:
-        offsets.append(position)
-        position += len(page.plain_text()) + len(PAGE_SEPARATOR)
-    return offsets
+    middle = page_width / 2
+
+    def key(block: dict) -> tuple[int, float]:
+        x0, y0, x1, _ = block["bbox"]
+        column = 0 if (x0 + x1) / 2 < middle else 1
+        return column, y0
+
+    return sorted(raw_blocks, key=key)

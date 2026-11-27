@@ -44,6 +44,7 @@ class PageText(BaseModel):      # one page
     page_label: str             # what's printed on the page ("22")
     extraction: Literal["text", "ocr"]
     blocks: list[Block]
+    section: str = ""           # header description section
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -84,3 +85,17 @@ class ParsedDocument(BaseModel): # The whole PDF Parsed
                 raise ValueError("page_offsets must never decrease")
         return self
 
+
+def compute_page_offsets(pages: list[PageText]) -> list[int]:
+    """Where each page starts in the whole document's text.
+
+    The document text is every page's plain_text() joined with PAGE_SEPARATOR,
+    so each next page starts after the previous page's text plus the separator.
+    Used by the parser, and again by cleaning after it changes the text.
+    """
+    offsets: list[int] = []
+    position = 0
+    for page in pages:
+        offsets.append(position)
+        position += len(page.plain_text()) + len(PAGE_SEPARATOR)
+    return offsets
