@@ -11,14 +11,14 @@ class FakeSource:
         self._files = dict(files)
         self._allowed_groups = allowed_groups or ["*"]
 
-    async def list(self) -> list[SourceRef]:
+    def list(self) -> list[SourceRef]:
         # Sorted so tests get the same order every run.
         return [
             SourceRef(uri=uri, allowed_groups=self._allowed_groups)
             for uri in sorted(self._files)
         ]
 
-    async def read(self, ref: SourceRef) -> bytes:
+    def read(self, ref: SourceRef) -> bytes:
         if ref.uri not in self._files:
             raise ExtractionFailed(ref.uri, "file could not be read")
         return self._files[ref.uri]

@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 from rag.adapters.fakes.fake_parser import FakeParser
@@ -14,30 +12,30 @@ from rag.ports.pdf_parser import PdfParser
 
 def test_source_lists_every_file_sorted():
     source: DocumentSource = FakeSource({"b.pdf": b"%PDF b", "a.pdf": b"%PDF a"})
-    refs = asyncio.run(source.list())
+    refs = source.list()
     assert [r.uri for r in refs] == ["a.pdf", "b.pdf"]
     assert all(r.allowed_groups == ["*"] for r in refs)
 
 
 def test_source_uses_given_groups():
     source = FakeSource({"a.pdf": b"%PDF"}, allowed_groups=["cardiologie"])
-    refs = asyncio.run(source.list())
+    refs = source.list()
     assert refs[0].allowed_groups == ["cardiologie"]
 
 
 def test_source_empty_lists_nothing():
-    assert asyncio.run(FakeSource({}).list()) == []
+    assert FakeSource({}).list() == []
 
 
 def test_source_reads_bytes():
     source = FakeSource({"a.pdf": b"%PDF a"})
-    assert asyncio.run(source.read(SourceRef(uri="a.pdf"))) == b"%PDF a"
+    assert source.read(SourceRef(uri="a.pdf")) == b"%PDF a"
 
 
 def test_source_missing_file_raises_extraction_failed():
     source = FakeSource({})
     with pytest.raises(ExtractionFailed) as err:
-        asyncio.run(source.read(SourceRef(uri="gone.pdf")))
+        source.read(SourceRef(uri="gone.pdf"))
     assert err.value.reason == "file could not be read"
 
 
@@ -45,7 +43,7 @@ def test_source_copies_input_dict():
     files = {"a.pdf": b"%PDF"}
     source = FakeSource(files)
     files["b.pdf"] = b"%PDF"
-    assert len(asyncio.run(source.list())) == 1
+    assert len(source.list()) == 1
 
 
 # ---------- FakeParser ----------
@@ -94,28 +92,19 @@ def test_parser_records_calls():
     assert parser.calls == ["a.pdf", "b.pdf"]
 
 
-def test_parser_runs_in_background_thread():
-    # The pipeline will call parse via asyncio.to_thread.
-    doc = asyncio.run(asyncio.to_thread(FakeParser().parse, b"%PDF", "id", "a.pdf"))
-    assert doc.file_name == "a.pdf"
-
-
 # ---------- Together: source -> parser, like the pipeline ----------
 
 def test_source_and_parser_together():
     source = FakeSource({"a.pdf": b"%PDF a", "bad.pdf": b"junk"})
     parser = FakeParser()
 
-    async def run():
-        parsed, failed = [], []
-        for ref in await source.list():
-            data = await source.read(ref)
-            try:
-                parsed.append(await asyncio.to_thread(parser.parse, data, "id", ref.uri))
-            except ExtractionFailed as e:
-                failed.append(e.name)
-        return parsed, failed
+    parsed, failed = [], []
+    for ref in source.list():
+        data = source.read(ref)
+        try:
+            parsed.append(parser.parse(data, "id", ref.uri))
+        except ExtractionFailed as e:
+            failed.append(e.name)
 
-    parsed, failed = asyncio.run(run())
     assert [d.file_name for d in parsed] == ["a.pdf"]
     assert failed == ["bad.pdf"]
